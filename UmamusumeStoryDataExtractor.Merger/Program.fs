@@ -2,8 +2,8 @@
 
 open System
 open System.Text
-open System.Text.RegularExpressions
 open System.Text.Json
+open System.Text.Encodings.Web
 open System.IO
 open System.Collections.Concurrent
 open System.Threading.Tasks
@@ -49,19 +49,9 @@ module Program =
                 Directory.CreateDirectory(outputDir) |> ignore
 
             use outputFile = new FileStream(outputJsonPath, FileMode.OpenOrCreate)
-            use writer = new StreamWriter(outputFile, Encoding.UTF8)
-
-            writer.Write('{')
-
-            for kv in result do
-                let processedText = Regex.Escape(kv.Value)
-                writer.Write($"\"{kv.Key}\": \"{processedText}\",")
-
-            writer.Flush()
-
-            if outputFile.Position > 1 then
-                outputFile.Seek(-1, SeekOrigin.Current) |> ignore // 去除结尾逗号
-
-            writer.Write('}')
+            let options = JsonSerializerOptions()
+            options.Encoder <- JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            options.WriteIndented <- true
+            Json.JsonSerializer.Serialize(outputFile, result, options)
 
             0
