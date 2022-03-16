@@ -2,7 +2,7 @@ name: ci
 on: [push, pull_request]
 jobs:
   build:
-    runs-on: windows-2019
+    runs-on: windows-latest
 
     steps:
       - name: checkout
@@ -13,7 +13,7 @@ jobs:
         uses: microsoft/setup-msbuild@v1.0.2
       - name: build
         run: |
-          msbuild UmamusumeStoryDataExtractor.sln -m -p:Configuration=Release;Platform=x64
+          msbuild UmamusumeStoryDataExtractor.sln -m "-p:Configuration=Release;Platform=x64"
       - name: prepare-package
         run: |
           mkdir package
