@@ -1,0 +1,3 @@
+[submodule "ThirdParty/AssetStudio"]
+	path = ThirdParty/AssetStudio
+	url = https://github.com/Perfare/AssetStudio.git
