@@ -5,6 +5,7 @@ open System.IO
 open System.Text.Json
 open System.Text.Encodings.Web
 open System.Text.RegularExpressions
+open System.Threading
 open System.Threading.Tasks
 open AssetStudio
 open SQLite
@@ -39,74 +40,99 @@ module Program =
             if Directory.Exists(dataDir) then
                 let stories = GetStoryDataPaths dataDir |> Seq.toArray
                 Console.WriteLine $"Discovered {stories.Length} stories"
+                Console.WriteLine "Press Ctrl-C to interrupt extraction"
 
                 use progressBar = new ProgressBar(stories.Length, "Extracting story data...")
 
-                Parallel.ForEach(
-                    stories,
-                    fun (storyData: StoryDataPair) ->
-                        let resultPath = Path.Combine(outputDir, storyData.Name + ".json")
+                use cancellationTokenSource = new CancellationTokenSource()
 
-                        if File.Exists(resultPath) then
-                            progressBar.Tick($"Skipping existing {storyData.Name}.json")
-                        else
-                            Directory.CreateDirectory(Path.GetDirectoryName(resultPath))
-                            |> ignore
+                let option =
+                    ParallelOptions(
+                        CancellationToken = cancellationTokenSource.Token,
+                        MaxDegreeOfParallelism = Environment.ProcessorCount
+                    )
 
-                            let mainScriptName = Path.GetFileName(storyData.Name)
-                            // 会做额外操作，还是一个个加载吧。。
-                            let assetManager = AssetsManager()
-                            assetManager.LoadFiles(Path.Combine(dataDir, "dat", storyData.Id.Substring(0, 2), storyData.Id))
-                            let loadedFile = assetManager.assetsFileList[0]
+                Console.CancelKeyPress.AddHandler (fun sender e ->
+                    cancellationTokenSource.Cancel()
+                    e.Cancel <- true)
 
-                            let textData =
-                                loadedFile.Objects
-                                |> Seq.filter (fun o -> o :? MonoBehaviour)
-                                |> Seq.cast<MonoBehaviour>
-                                |> Seq.map (fun o ->
-                                    if o.m_Name = mainScriptName then
-                                        let typeTree = o.ToType()
-                                        [ typeTree["Title"] :?> string ] :> seq<string>
-                                    else
-                                        let succeed, script = o.m_Script.TryGet()
+                try
+                    Parallel.ForEach(
+                        stories,
+                        option,
+                        fun (storyData: StoryDataPair) ->
+                            let resultPath = Path.Combine(outputDir, storyData.Name + ".json")
 
-                                        if succeed
-                                           && script.m_Name = "StoryTimelineTextClipData" then
+                            if File.Exists(resultPath) then
+                                progressBar.Tick($"Skipping existing {storyData.Name}.json")
+                            else
+                                Directory.CreateDirectory(Path.GetDirectoryName(resultPath))
+                                |> ignore
+
+                                let mainScriptName = Path.GetFileName(storyData.Name)
+                                // 会做额外操作，还是一个个加载吧。。
+                                let assetManager = AssetsManager()
+
+                                assetManager.LoadFiles(
+                                    Path.Combine(dataDir, "dat", storyData.Id.Substring(0, 2), storyData.Id)
+                                )
+
+                                let loadedFile = assetManager.assetsFileList[0]
+
+                                let textData =
+                                    loadedFile.Objects
+                                    |> Seq.filter (fun o -> o :? MonoBehaviour)
+                                    |> Seq.cast<MonoBehaviour>
+                                    |> Seq.map (fun o ->
+                                        if o.m_Name = mainScriptName then
                                             let typeTree = o.ToType()
-
-                                            let result =
-                                                [ typeTree["Name"] :?> string
-                                                  typeTree["Text"] :?> string ]
-
-                                            let choiceDataList =
-                                                typeTree["ChoiceDataList"] :?> System.Collections.Generic.IList<obj>
-
-                                            if choiceDataList = null then
-                                                result
-                                            else
-                                                result
-                                                |> Seq.append (
-                                                    choiceDataList
-                                                    |> Seq.map (fun (obj) ->
-                                                        (obj :?> System.Collections.Specialized.OrderedDictionary)["Text"]
-                                                        :?> string)
-                                                )
+                                            [ typeTree["Title"] :?> string ] :> seq<string>
                                         else
-                                            [])
-                                |> Seq.concat
-                                |> Seq.distinct
-                                |> Seq.map (fun text -> CppUtility.GetCppStdHash(text).ToString(), text)
-                                |> Map.ofSeq
+                                            let succeed, script = o.m_Script.TryGet()
 
-                            use outputFile = new FileStream(resultPath, FileMode.OpenOrCreate)
-                            let options = JsonSerializerOptions()
-                            options.Encoder <- JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                            options.WriteIndented <- true
-                            JsonSerializer.Serialize(outputFile, textData, options)
+                                            if succeed
+                                               && script.m_Name = "StoryTimelineTextClipData" then
+                                                let typeTree = o.ToType()
 
-                            progressBar.Tick($"Extracted {storyData.Name}.json")
-                )
-                |> ignore
+                                                let result =
+                                                    [ typeTree["Name"] :?> string
+                                                      typeTree["Text"] :?> string ]
+
+                                                let choiceDataList =
+                                                    typeTree["ChoiceDataList"] :?> System.Collections.Generic.IList<obj>
+
+                                                if choiceDataList = null then
+                                                    result
+                                                else
+                                                    result
+                                                    |> Seq.append (
+                                                        choiceDataList
+                                                        |> Seq.map (fun (obj) ->
+                                                            (obj :?> System.Collections.Specialized.OrderedDictionary)["Text"]
+                                                            :?> string)
+                                                    )
+                                            else
+                                                [])
+                                    |> Seq.concat
+                                    |> Seq.distinct
+                                    |> Seq.map (fun text -> CppUtility.GetCppStdHash(text).ToString(), text)
+                                    |> Map.ofSeq
+
+                                use outputFile = new FileStream(resultPath, FileMode.OpenOrCreate)
+
+                                let options =
+                                    JsonSerializerOptions(
+                                        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                                        WriteIndented = true
+                                    )
+
+                                JsonSerializer.Serialize(outputFile, textData, options)
+
+                                progressBar.Tick($"Extracted {storyData.Name}.json")
+                    )
+                    |> ignore
+                with
+                | :? OperationCanceledException -> progressBar.WriteErrorLine("Extraction interrupted by user request")
 
                 0
             else
