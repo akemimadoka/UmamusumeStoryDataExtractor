@@ -19,7 +19,7 @@ module Program =
             let extractedDataDirPath = args[0]
             let outputJsonPath = args[1]
 
-            let result = ConcurrentDictionary<string, string>()
+            let result = ConcurrentQueue<string * string>()
 
             let allFiles =
                 Directory.GetFiles(extractedDataDirPath, "*", SearchOption.AllDirectories)
@@ -34,12 +34,8 @@ module Program =
                     doc.RootElement.EnumerateObject()
                     |> Seq.iter (fun obj ->
                         let value = obj.Value.GetString()
-                        let oldValue = result.GetOrAdd(obj.Name, value)
-
-                        if oldValue <> value then
-                            Console.WriteLine $"Text \"{oldValue}\" and \"{obj.Value}\" conflicts!")
-
-                    ()
+                        result.Enqueue(obj.Name, value)
+                    )
             )
             |> ignore
 
@@ -49,9 +45,15 @@ module Program =
                 Directory.CreateDirectory(outputDir) |> ignore
 
             use outputFile = new FileStream(outputJsonPath, FileMode.OpenOrCreate)
-            let options = JsonSerializerOptions()
-            options.Encoder <- JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-            options.WriteIndented <- true
-            Json.JsonSerializer.Serialize(outputFile, result, options)
+            let options = JsonWriterOptions(
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                Indented = true
+            )
+            use writer = new Utf8JsonWriter(outputFile, options)
+            writer.WriteStartObject()
+            for (hash, text) in result |> Seq.distinctBy(fun (k, _) -> k) do
+                writer.WritePropertyName(hash)
+                writer.WriteStringValue(text)
+            writer.WriteEndObject()
 
             0

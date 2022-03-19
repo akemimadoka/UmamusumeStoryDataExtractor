@@ -116,17 +116,21 @@ module Program =
                                     |> Seq.concat
                                     |> Seq.distinct
                                     |> Seq.map (fun text -> CppUtility.GetCppStdHash(text).ToString(), text)
-                                    |> Map.ofSeq
 
                                 use outputFile = new FileStream(resultPath, FileMode.OpenOrCreate)
 
                                 let options =
-                                    JsonSerializerOptions(
+                                    JsonWriterOptions(
                                         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                                        WriteIndented = true
+                                        Indented = true
                                     )
 
-                                JsonSerializer.Serialize(outputFile, textData, options)
+                                use writer = new Utf8JsonWriter(outputFile, options)
+                                writer.WriteStartObject()
+                                for (hash, text) in textData do
+                                    writer.WritePropertyName(hash)
+                                    writer.WriteStringValue(text)
+                                writer.WriteEndObject()
 
                                 progressBar.Tick($"Extracted {storyData.Name}.json")
                     )
