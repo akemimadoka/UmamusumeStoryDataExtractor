@@ -130,17 +130,23 @@ module Program =
                                                         typeTree["ChoiceDataList"]
                                                         :?> System.Collections.Generic.IList<obj>
 
-                                                    if choiceDataList = null then
-                                                        result
-                                                    else
-                                                        result
-                                                        |> Seq.append (
-                                                            choiceDataList
-                                                            |> Seq.map (fun (obj) ->
-                                                                (obj
-                                                                :?> System.Collections.Specialized.OrderedDictionary)["Text"]
-                                                                :?> string)
-                                                        )
+                                                    let colorTextInfoList =
+                                                        typeTree["ColorTextInfoList"]
+                                                        :?> System.Collections.Generic.IList<obj>
+
+                                                    result
+                                                    |> Seq.append (
+                                                        choiceDataList
+                                                        |> Seq.map (fun obj ->
+                                                            (obj :?> System.Collections.Specialized.OrderedDictionary)["Text"]
+                                                            :?> string)
+                                                    )
+                                                    |> Seq.append (
+                                                        colorTextInfoList
+                                                        |> Seq.map (fun obj ->
+                                                            (obj :?> System.Collections.Specialized.OrderedDictionary)["Text"]
+                                                            :?> string)
+                                                    )
                                                 else
                                                     [])
                                         |> Seq.concat
