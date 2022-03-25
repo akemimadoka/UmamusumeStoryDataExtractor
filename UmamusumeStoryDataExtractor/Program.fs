@@ -109,18 +109,20 @@ module Program =
                                                 let typeTree = o.ToType()
 
                                                 match textData with
-                                                | Story _ -> [ typeTree["Title"] :?> string ] :> seq<string>
+                                                | Story _ -> (-1, [ typeTree["Title"] :?> string ] :> seq<string>)
                                                 | Race _ ->
-                                                    (typeTree["textData"] :?> System.Collections.Generic.IList<obj>)
-                                                    |> Seq.map (fun obj ->
-                                                        (obj :?> System.Collections.Specialized.OrderedDictionary)["text"]
-                                                        :?> string)
+                                                    (-1,
+                                                     (typeTree["textData"] :?> System.Collections.Generic.IList<obj>)
+                                                     |> Seq.cast<System.Collections.Specialized.OrderedDictionary>
+                                                     |> Seq.sortBy (fun obj -> obj["key"] :?> int)
+                                                     |> Seq.map (fun obj -> obj["text"] :?> string))
                                             else
                                                 let succeed, script = o.m_Script.TryGet()
 
                                                 if succeed
                                                    && script.m_Name = "StoryTimelineTextClipData" then
                                                     let typeTree = o.ToType()
+                                                    let nextBlock = typeTree["NextBlock"] :?> int
 
                                                     let result =
                                                         [ typeTree["Name"] :?> string
@@ -134,21 +136,27 @@ module Program =
                                                         typeTree["ColorTextInfoList"]
                                                         :?> System.Collections.Generic.IList<obj>
 
-                                                    result
-                                                    |> Seq.append (
-                                                        choiceDataList
-                                                        |> Seq.map (fun obj ->
-                                                            (obj :?> System.Collections.Specialized.OrderedDictionary)["Text"]
-                                                            :?> string)
-                                                    )
-                                                    |> Seq.append (
-                                                        colorTextInfoList
-                                                        |> Seq.map (fun obj ->
-                                                            (obj :?> System.Collections.Specialized.OrderedDictionary)["Text"]
-                                                            :?> string)
-                                                    )
+                                                    ((if nextBlock > 0 then
+                                                          nextBlock
+                                                      else
+                                                          Int32.MaxValue),
+                                                     result
+                                                     |> Seq.append (
+                                                         choiceDataList
+                                                         |> Seq.map (fun obj ->
+                                                             (obj :?> System.Collections.Specialized.OrderedDictionary)["Text"]
+                                                             :?> string)
+                                                     )
+                                                     |> Seq.append (
+                                                         colorTextInfoList
+                                                         |> Seq.map (fun obj ->
+                                                             (obj :?> System.Collections.Specialized.OrderedDictionary)["Text"]
+                                                             :?> string)
+                                                     ))
                                                 else
-                                                    [])
+                                                    (0, []))
+                                        |> Seq.sortBy (fun (k, _) -> k)
+                                        |> Seq.map (fun (_, v) -> v)
                                         |> Seq.concat
                                         |> Seq.distinct
                                         |> Seq.map (fun text -> CppUtility.GetCppStdHash(text).ToString(), text)
