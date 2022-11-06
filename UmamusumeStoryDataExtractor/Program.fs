@@ -48,26 +48,29 @@ and TextDataConverter() =
 
     override _.Write(writer: Utf8JsonWriter, value: TextData, options: JsonSerializerOptions) =
         match value with
-            | StoryData (title, textBlockList) ->
-                writer.WriteStartObject()
-                writer.WriteString("Title", title)
-                writer.WritePropertyName("TextBlockList")
-                writer.WriteStartArray()
-                for textBlock in textBlockList do
-                    match textBlock with
-                    | ValueSome block -> JsonSerializer.Serialize(writer, block, options)
-                    | ValueNone -> writer.WriteNullValue()
-                writer.WriteEndArray()
-                writer.WriteEndObject()
-            | RaceData textData ->
-                writer.WriteStartArray()
-                for text in textData do
-                    writer.WriteStringValue(text)
-                writer.WriteEndArray()
+        | StoryData (title, textBlockList) ->
+            writer.WriteStartObject()
+            writer.WriteString("Title", title)
+            writer.WritePropertyName("TextBlockList")
+            writer.WriteStartArray()
+            for textBlock in textBlockList do
+                match textBlock with
+                | ValueSome block -> JsonSerializer.Serialize(writer, block, options)
+                | ValueNone -> writer.WriteNullValue()
+            writer.WriteEndArray()
+            writer.WriteEndObject()
+        | RaceData textData ->
+            writer.WriteStartArray()
+            for text in textData do
+                writer.WriteStringValue(text)
+            writer.WriteEndArray()
 
 module Program =
     let StoryTimelinePattern =
         Regex(@"story/data/\d+/\d+/storytimeline_\d+", RegexOptions.Compiled)
+
+    let HomeTimelinePattern =
+        Regex(@"home/data/(\d+)/(\d+)/hometimeline_\1_\2_\d+", RegexOptions.Compiled)
 
     let RaceTimelinePattern =
         Regex(@"race/storyrace/text/storyrace_\d+", RegexOptions.Compiled)
@@ -78,7 +81,7 @@ module Program =
         connection.Query<TextDataPair>("select n, h from a")
         |> Seq.map (fun textData ->
             match textData.Name with
-            | name when StoryTimelinePattern.IsMatch(name) -> Some(Story(textData))
+            | name when StoryTimelinePattern.IsMatch(name) || HomeTimelinePattern.IsMatch(name) -> Some(Story(textData))
             | name when RaceTimelinePattern.IsMatch(name) -> Some(Race(textData))
             | _ -> None)
         |> Seq.choose id
@@ -98,8 +101,12 @@ module Program =
                         Directory.EnumerateFiles(args[2], "*.json", SearchOption.AllDirectories)
                         |> Seq.map(fun file ->
                             use fileStream = new FileStream(file, FileMode.Open, FileAccess.Read)
-                            JsonSerializer.Deserialize<Collections.Generic.Dictionary<string, string>>(fileStream)
+                            try
+                                JsonSerializer.Deserialize<Collections.Generic.Dictionary<string, string>>(fileStream)
+                            with
+                            | _ -> null
                         )
+                        |> Seq.where (isNull >> not)
                     Seq.fold(fun (resultMap: Collections.Generic.Dictionary<uint64, string>) (map: Collections.Generic.Dictionary<string, string>) ->
                         for kv in map do
                             let succeed, hash = UInt64.TryParse(kv.Key)
@@ -111,8 +118,16 @@ module Program =
                 else
                     null
 
-            let mayLocalize str = if hashMap = null then str else let found, var = hashMap.TryGetValue(CppUtility.GetCppStdHash(str)) in if found then var else str
-                    
+            let mayLocalize str =
+                if hashMap = null then
+                    str
+                else
+                    let found, var = hashMap.TryGetValue(CppUtility.GetCppStdHash(str))
+                    if found then
+                        var
+                    else
+                        str
+
             if Directory.Exists(dataDir) then
                 let textSources = GetTextSourcePaths dataDir |> Seq.toArray
                 Console.WriteLine $"Discovered {textSources.Length} stories"
