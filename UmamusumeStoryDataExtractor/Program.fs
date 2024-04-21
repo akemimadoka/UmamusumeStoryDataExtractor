@@ -28,12 +28,45 @@ type TextSource =
         | Story textData -> textData
         | Race textData -> textData
 
+[<JsonConverter(typeof<TextBlockConverter>)>]
 type TextBlock = {
     Name: string
     Text: string
     ChoiceDataList: string[]
     ColorTextInfoList: string[]
+    Siblings: ValueOption<TextBlock[]>
 }
+
+and TextBlockConverter() =
+    inherit JsonConverter<TextBlock>()
+
+    override _.Read(reader: byref<Utf8JsonReader>, typeToConvert: Type, options: JsonSerializerOptions): TextBlock =
+        raise (NotImplementedException())
+
+    override this.Write(writer: Utf8JsonWriter, value: TextBlock, options: JsonSerializerOptions) =
+        writer.WriteStartObject()
+        writer.WriteString("Name", value.Name)
+        writer.WriteString("Text", value.Text)
+
+        writer.WriteStartArray("ChoiceDataList")
+        for choiceData in value.ChoiceDataList do
+            writer.WriteStringValue(choiceData)
+        writer.WriteEndArray()
+
+        writer.WriteStartArray("ColorTextInfoList")
+        for colorTextInfo in value.ColorTextInfoList do
+            writer.WriteStringValue(colorTextInfo)
+        writer.WriteEndArray()
+
+        match value.Siblings with
+        | ValueSome siblings ->
+            writer.WriteStartArray("Siblings")
+            for sibling in siblings do
+                this.Write(writer, sibling, options)
+            writer.WriteEndArray()
+        | _ -> ()
+
+        writer.WriteEndObject()
 
 [<JsonConverter(typeof<TextDataConverter>)>]
 type TextData =
@@ -56,7 +89,7 @@ and TextDataConverter() =
             for textBlock in textBlockList do
                 match textBlock with
                 | ValueSome block -> JsonSerializer.Serialize(writer, block, options)
-                | ValueNone -> writer.WriteNullValue()
+                | _ -> writer.WriteNullValue()
             writer.WriteEndArray()
             writer.WriteEndObject()
         | RaceData textData ->
@@ -197,32 +230,40 @@ module Program =
                                                 |> Seq.cast<Collections.Specialized.OrderedDictionary>
                                                 |> Seq.sortBy (fun obj -> obj["BlockIndex"] :?> int)
                                                 |> Seq.map (fun obj ->
-                                                    let clipList = (obj["TextTrack"] :?> Collections.Specialized.OrderedDictionary)["ClipList"] :?> Collections.Generic.IList<obj>
+                                                    (obj["TextTrack"] :?> Collections.Specialized.OrderedDictionary)["ClipList"] :?> Collections.Generic.IList<obj>)
+                                                |> Seq.map (fun clipList ->
                                                     if clipList.Count = 0 then
-                                                        clipList.Add(null)
-                                                    elif clipList.Count > 1 then
-                                                        raise (Exception($"Invalid block(In {data.Name})"))
-                                                    clipList
-                                                    )
-                                                |> Seq.concat
-                                                |> Seq.map (fun obj ->
-                                                    if isNull(obj) then
                                                         ValueNone
                                                     else
-                                                        let textClip = textClipData[(obj :?> Collections.Specialized.OrderedDictionary)["m_PathID"] :?> int64]
-                                                        let name = mayLocalize(textClip["Name"] :?> string)
-                                                        let text = mayLocalize(textClip["Text"] :?> string)
-                                                        let choiceDataList =
-                                                            textClip["ChoiceDataList"] :?> Collections.Generic.IList<obj>
-                                                            |> Seq.cast<Collections.Specialized.OrderedDictionary>
-                                                            |> Seq.map (fun obj -> mayLocalize(obj["Text"] :?> string))
-                                                            |> Seq.toArray
-                                                        let colorTextInfoList =
-                                                            textClip["ColorTextInfoList"] :?> Collections.Generic.IList<obj>
-                                                            |> Seq.cast<Collections.Specialized.OrderedDictionary>
-                                                            |> Seq.map (fun obj -> mayLocalize(obj["Text"] :?> string))
-                                                            |> Seq.toArray
-                                                        ValueSome({ Name = name; Text = text; ChoiceDataList = choiceDataList; ColorTextInfoList = colorTextInfoList })
+                                                        let firstClip = clipList[0]
+                                                        let getTextClipContent (textClip: obj) =
+                                                            let textClip = textClipData[(textClip :?> Collections.Specialized.OrderedDictionary)["m_PathID"] :?> int64]
+                                                            let name = mayLocalize(textClip["Name"] :?> string)
+                                                            let text = mayLocalize(textClip["Text"] :?> string)
+                                                            let choiceDataList =
+                                                                textClip["ChoiceDataList"] :?> Collections.Generic.IList<obj>
+                                                                |> Seq.cast<Collections.Specialized.OrderedDictionary>
+                                                                |> Seq.map (fun obj -> mayLocalize(obj["Text"] :?> string))
+                                                                |> Seq.toArray
+                                                            let colorTextInfoList =
+                                                                textClip["ColorTextInfoList"] :?> Collections.Generic.IList<obj>
+                                                                |> Seq.cast<Collections.Specialized.OrderedDictionary>
+                                                                |> Seq.map (fun obj -> mayLocalize(obj["Text"] :?> string))
+                                                                |> Seq.toArray
+                                                            name, text, choiceDataList, colorTextInfoList
+                                                        let name, text, choiceDataList, colorTextInfoList = getTextClipContent firstClip
+                                                        let siblings =
+                                                            if clipList.Count > 1 then
+                                                                ValueSome(clipList
+                                                                |> Seq.skip 1
+                                                                |> Seq.map (fun clip ->
+                                                                    let name, text, choiceDataList, colorTextInfoList = getTextClipContent clip
+                                                                    { Name = name; Text = text; ChoiceDataList = choiceDataList; ColorTextInfoList = colorTextInfoList; Siblings = ValueNone }
+                                                                )
+                                                                |> Seq.toArray)
+                                                            else
+                                                                ValueNone
+                                                        ValueSome { Name = name; Text = text; ChoiceDataList = choiceDataList; ColorTextInfoList = colorTextInfoList; Siblings = siblings }
                                                     )
                                                 |> Seq.toArray
                                             Some(StoryData(title, blockList))
