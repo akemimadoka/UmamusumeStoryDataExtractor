@@ -18,8 +18,8 @@ jobs:
       - name: prepare-package
         run: |
           mkdir package
-          cp -r -force UmamusumeStoryDataExtractor/bin/Release/net6.0/* package/
-          cp -r -force UmamusumeStoryDataExtractor.Merger/bin/Release/net6.0/* package/
+          cp -r -force UmamusumeStoryDataExtractor/bin/Release/net8.0/* package/
+          cp -r -force UmamusumeStoryDataExtractor.Merger/bin/Release/net8.0/* package/
       - uses: actions/upload-artifact@v2
         with:
           name: UmamusumeStoryDataExtractor
